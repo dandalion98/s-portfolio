@@ -12,20 +12,27 @@ var _ = require('lodash'),
     express = require('express'),
     config = require('./config/config'),
     StellarSdk = require('stellar-sdk'),
-    util = require('util');
+  config = require("./config/config");
 
+require('app-module-path').addPath("./common_modules")
+require("./src/models")
+let proto = require('./src/proto')
 
 async function main() {
-    fetchTrades();
+  await initPG()
+
+  await proto.test()
 }
 
-var app = express();
-app.listen(config.port);
-app.on('error', function (err) {
-    console.log('on error handler');
-    console.log(err);
-});
+async function initPG() {
+  let pgo = require('pg-orm')
+  pgo.setConfig(config.db)
+  // await pgo.dropdb()
+  await pgo.init(false)
+}
 
+
+main()
 
 process.on('unhandledRejection', (reason, p) => {
     console.log('Unhandled Rejection at: Promise', p, 'reason:', reason);

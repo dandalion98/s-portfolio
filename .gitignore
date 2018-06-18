@@ -49,6 +49,7 @@ _site/
 *.swp
 logs/
 build/
+temp/
 
 # Sublime editor
 # ==============

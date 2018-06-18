@@ -1,0 +1,6 @@
+[submodule "common_modules/stellar-pay"]
+	path = common_modules/stellar-pay
+	url = git@github.com:dandalion98/stellar-pay.git
+[submodule "common_modules/pg-orm"]
+	path = common_modules/pg-orm
+	url = git@github.com:dandalion98/pg-orm.git
