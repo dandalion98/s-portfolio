@@ -12,16 +12,58 @@ var _ = require('lodash'),
     express = require('express'),
     config = require('./config/config'),
     StellarSdk = require('stellar-sdk'),
+    log4js = require('log4js'),
+    fs = require('fs'),
   config = require("./config/config");
 
 require('app-module-path').addPath("./common_modules")
 require("./src/models")
-let proto = require('./src/proto')
 
-async function main() {
+
+let LOG_FILES = ['./logs/main.log', './logs/aggs.log', './logs/value.log']
+for (let lf of LOG_FILES) {
+  try {
+    fs.unlinkSync(lf)
+  } catch (e) { }
+}
+
+log4js.configure({
+  appenders: { main: { type: 'file', filename: 'logs/main.log', level: 'debug' },
+               aggs: { type: 'file', filename: 'logs/aggs.log', level: 'debug' },
+               value: { type: 'file', filename: 'logs/value.log', level: 'debug' },
+               },
+  categories: { default: { appenders: ['main', 'aggs', 'value'], level: 'debug' } }
+});
+
+var logr = log4js.getLogger('aggs');
+logr.error("AGGS")
+
+
+let controllers = require('./src/controller')
+let seed = require('./src/seed')
+
+
+async function main() { 
   await initPG()
 
-  await proto.test()
+  await seed.seed()
+
+  // await controllers.test() 
+
+  log.info("Starting server on port: " + config.port)
+  var app = express();
+
+  const bodyParser = require('body-parser');
+  app.use(bodyParser.json());
+  app.use(bodyParser.urlencoded({ extended: false }));
+
+  app.listen(config.port);
+  app.on('error', function (err) {
+
+    console.log('on error handler'); 
+    console.log(err);
+  });
+  controllers.registerRoutes(app)
 }
 
 async function initPG() {
@@ -30,7 +72,6 @@ async function initPG() {
   // await pgo.dropdb()
   await pgo.init(false)
 }
-
 
 main()
 

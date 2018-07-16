@@ -54,7 +54,7 @@ gulp.task('nodemon', function () {
 
     return plugins.nodemon({
         script: 'app.js',
-        nodeArgs: ["--inspect"],
+        nodeArgs: ["--inspect=9228"],
         ext: 'js,html',
         verbose: true,
         watch: watchAssets

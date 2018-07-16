@@ -50,6 +50,9 @@ _site/
 logs/
 build/
 temp/
+sample/
+backup/
+src/seed.js
 
 # Sublime editor
 # ==============

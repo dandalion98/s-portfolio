@@ -15,16 +15,23 @@ var pgo = require('pg-orm'),
     moment = require("moment"),
     Model = pgo.Model;
 
+// Fix for parsing of numeric fields
+var types = require('pg').types
+types.setTypeParser(1700, 'text', parseFloat);
+
 class Account extends Model {
     constructor(data) {
         super(data)
     }
 }
 Account.structure = [
-    ["address", { "type": "string", "maxLength": 60 }],
+    ["address", { "type": "string", "maxLength": 60, "unique": true, "index": true }],
     ["name", { "type": "text", "optional": true}],
     ["desc", { "type": "text", "optional": true }],
-    ["mirror", { "type": "foreignKey", "target": "Account", "optional": true }]
+    ["mirror", { "type": "foreignKey", "target": "Account", "optional": true }],
+    // error status
+    ["status", { "type": "string", "maxLength": 15, "optional":true }],
+    ["lastUpdateTime", { "type": "datetime", "optional": true }]
 ]
 pgo.registerModel(Account, moduleName)    
 
@@ -34,10 +41,12 @@ class AccountAggregation extends Model {
     }
 }
 AccountAggregation.structure = [
-    ["account", { "type": "foreignKey", "target": "Account" }],
+    ["account", { "type": "foreignKey", "target": "Account", deleteCascade: true }],
     ["type", { "type": "string", "maxLength": 10}],    
     ["roi", { "type": "decimal", "optional": true, default: 0}],
-    ["totalProfits", { "type": "decimal", default: 0 }]
+    ["totalProfits", { "type": "decimal", default: 0 }],
+    ["totalTrades", { "type": "integer", default: 0}],
+    ["totalWinningTrades", { "type": "integer", default: 0 }]
 ]
 
 AccountAggregation.constraints = [
@@ -72,31 +81,51 @@ class AccountSummary extends Model {
         // base investment at start of period
         let baseInvestment = start.getBaseInvestment()
 
-        // this is optional: prevents inflated ROI in case
+        // prevents inflated ROI in case
         // return was generated using credits from this period
-        // baseInvest += this.getNetCredit()
+        let netCredits = this.totalCredits - start.totalCredits
+        baseInvestment += netCredits
 
         return profit / baseInvestment
     }
 
-    updateTotals(lastWr) {
-        this.totalCredits = lastWr.totalCredits + (this.credits || 0)
-        this.totalDebits = lastWr.totalDebits + (this.debits || 0)
-        this.totalProfits = lastWr.totalProfits + (this.profits || 0)
+    updateTotals(prevOrSameDayRecord) {
+        log.error("udpating tot last")
+        console.dir(prevOrSameDayRecord)
+
+        this.totalCredits = +prevOrSameDayRecord.totalCredits + (this.credits || 0)
+        this.totalDebits = +prevOrSameDayRecord.totalDebits + (this.debits || 0)
+        this.totalProfits = +prevOrSameDayRecord.totalProfits + (this.profits || 0)
+        
+        this.totalTrades = +prevOrSameDayRecord.totalTrades + (this.trades || 0)
+        this.totalWinningTrades = +prevOrSameDayRecord.totalWinningTrades + (this.winningTrades || 0)
+
+        this.totalCredits = roundTo(this.totalCredits, 7)
+        this.totalDebits = roundTo(this.totalDebits, 7)
+        this.totalProfits = roundTo(this.totalProfits, 7)
+        
     }
 }
 AccountSummary.structure = [
-    ["account", { "type": "foreignKey", "target": "Account" }],    
+    ["account", { "type": "foreignKey", "target": "Account", deleteCascade: true }],    
     ["date", { "type": "date" }],
     ["credits", { "type": "decimal", "default": 0 }],
     ["debits", { "type": "decimal", "default": 0 }],
     ["profits", { "type": "decimal", "default": 0 }],
+    ["trades", { "type": "decimal", "default": 0 }],
+    ["winningTrades", { "type": "decimal", "default": 0 }],
     ["countClosePositions", { "type": "integer", "default": 0 }],
     ["endBalance", { "type": "text", "optional": true }],
 
     ["totalCredits", { "type": "decimal", "optional": true }],
     ["totalDebits", { "type": "decimal", "optional": true }],
-    ["totalProfits", { "type": "decimal", "optional": true }]
+    ["totalProfits", { "type": "decimal", "optional": true }],
+    ["totalTrades", { "type": "integer", "optional": true}],
+    ["totalWinningTrades", { "type": "integer", "optional": true }],
+
+    ["lastEffectId", { "type": "text" }],
+    ["valueXlm", { "type": "decimal", optional: true }],
+    ["valueUsd", { "type": "decimal", optional: true }]
 ]
 
 pgo.registerModel(AccountSummary, moduleName)    
@@ -179,25 +208,60 @@ class Position extends Model {
         if (peer.openAmount < this.soldAmount) {
             throw new Error("not enough open amount in peer")
         }
-
+        
         let soldPercent = this.soldAmount / peer.openAmount
         peer.openAmount -= this.soldAmount
+        peer.openAmount = roundTo(peer.openAmount, 7)
         this.openTradeId = peer.tradeId
 
         if (this.isClosePosition() ) {
-            this.profits = this.boughtAmount - (peer.soldAmount * soldPercent)
+            this.profits = (this.soldPrice - peer.boughtPrice) * this.soldAmount
+            this.closeBasisPrice = peer.boughtPrice
             this.profits = roundTo(this.profits, 7)
         }
     }
+
+    round(precision) {
+        this.boughtAmount = this.boughtAmount.toFixed(precision)
+        this.boughtPrice = this.boughtPrice.toFixed(precision)
+        this.openAmount = this.openAmount.toFixed(precision)
+        this.soldAmount = this.soldAmount.toFixed(precision)
+        this.soldPrice = this.soldPrice.toFixed(precision)
+        if (this.closeBasisPrice) {
+            this.closeBasisPrice = this.closeBasisPrice.toFixed(precision)
+        }
+        this.profits = this.profits.toFixed(precision)
+    }
+
+    // round(precision) {
+    //     this.boughtAmount = roundTo(this.boughtAmount, precision)
+    //     this.boughtPrice = roundTo(this.boughtPrice, precision)
+    //     this.openAmount = roundTo(this.openAmount, precision)
+    //     this.soldAmount = roundTo(this.soldAmount, precision)
+    //     this.soldPrice = roundTo(this.soldPrice, precision)
+    //     if (this.closeBasisPrice) {
+    //         this.closeBasisPrice = roundTo(this.closeBasisPrice, precision)            
+    //     }
+    //     this.profits = roundTo(this.profits, precision)
+    // }
 }
 Position.structure = [
-    ["account", { "type": "foreignKey", "target": "Account"}],    
+    ["account", { "type": "foreignKey", "target": "Account", deleteCascade: true}],    
     ["tradeId", { "type": "text"}],
+    // open or close
+    ["type", { "type": "string", "maxLength": 10 }],
+
     ["boughtAsset", { "type": "string", "maxLength": 80 }],    
     ["boughtAmount", { "type": "decimal", "default": 0 }],
+    ["boughtPrice", { "type": "decimal", "default": 0 }],
+
     ["openAmount", { "type": "decimal", "default": 0 }],
     ["soldAsset", { "type": "string", "maxLength": 80 }],
     ["soldAmount", { "type": "decimal", "default": 0 }],
+    ["soldPrice", { "type": "decimal", "default": 0 }],
+    // Cost basis price for close positions
+    ["closeBasisPrice", { "type": "decimal", "default": 0, "optional": true }],
+        
     ["openTradeId", { "type": "text", "optional":true}],
     // profits in XLM
     ["profits", { "type": "decimal", "default": 0}],
@@ -205,4 +269,3 @@ Position.structure = [
 ]
 
 pgo.registerModel(Position, moduleName)
-

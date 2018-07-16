@@ -2,7 +2,7 @@ module.exports = {
     stellarServer: "https://horizon-testnet.stellar.org",
     db: {
         "user": "postgres",
-        "database": "sp_test",
+        "database": "sp_test2",
         "password": "whynot32",
         "host": "localhost",
         "port": 5432,
