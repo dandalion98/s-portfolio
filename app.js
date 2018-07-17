@@ -40,13 +40,13 @@ logr.error("AGGS")
 
 
 let controllers = require('./src/controller')
-let seed = require('./src/seed')
+// let seed = require('./src/seed')
 
 
 async function main() { 
   await initPG()
 
-  await seed.seed()
+//   await seed.seed()
 
   // await controllers.test() 
 
@@ -54,8 +54,8 @@ async function main() {
   var app = express();
 
   const bodyParser = require('body-parser');
-  app.use(bodyParser.json());
-  app.use(bodyParser.urlencoded({ extended: false }));
+  app.use(bodyParser({ limit: '50mb' }));
+
 
   app.listen(config.port);
   app.on('error', function (err) {

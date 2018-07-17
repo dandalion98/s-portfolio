@@ -19,8 +19,10 @@ let NUMERICAL_FIELDS = ["sold_amount", "bought_amount", "amount"]
  * Parses an account effect from Horizon.
  */
 class AccountEffect {
-    constructor(data) {
+    constructor(account, data) {
         Object.assign(this, data)
+
+        this.account = account
 
         delete this._links
 
@@ -170,10 +172,10 @@ module.exports.PositionMatcher = PositionMatcher
  * and trades, and for tracking trade positions.
  */
 class AccountEffects {
-    constructor(data) {
+    constructor(account, data) {
         this.effects = []
         for (let t of data) {
-            this.effects.push(new AccountEffect(t))
+            this.effects.push(new AccountEffect(account, t))
         }
     }
 

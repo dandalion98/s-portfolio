@@ -95,7 +95,7 @@ async function listAccounts(request, response) {
 async function createAccount(request, response) {
     log.info("creating account")
     let data = request.body
-    console.dir(data)
+    // console.dir(data)
     let address = data.address
     if (!address) {
         throw new ServerError("no address", "no_address")
@@ -116,7 +116,7 @@ async function createAccount(request, response) {
     await a.save()
 
     // TODO: handle failures
-    await updateAccount(a)
+    await updateAccount(a, data.effects)
 
     response.json(a)
 }
@@ -124,16 +124,32 @@ async function createAccount(request, response) {
 async function deleteAccount(request, response) {
     let account = request.account
     await account.delete()
-    respons.json({})
+    response.json({})
 }
 
-async function updateAccount(account) {
+function filterNewEffects(effects, latestEffectId) {
+    if (!latestEffectId) {
+        return effects
+    }
+
+    let out = []
+    for (let effect of effects) {
+        if (effect.id == latestEffectId) {
+            break
+        }
+        out.push(effect)
+    }
+
+    return out
+}
+
+async function updateAccount(account, effects) {
     let DONT_SAVE = false
 
     // await pgo.truncateAll()
     logger.debug("checking account", account)
     let latestDayRecord = await AccountSummary.objects.get({account:account, orderBy:"-date"})
-    let latestTxId = latestDayRecord ? latestDayRecord.lastEffectId : null
+    let latestEffectId = latestDayRecord ? latestDayRecord.lastEffectId : null
     logger.debug("checking latestDayRecord", latestDayRecord)
 
     let stellarAccount = stellarServer.getAccount({address: account.address})
@@ -141,18 +157,22 @@ async function updateAccount(account) {
     console.dir(balance) 
 
     logger.debug("---------------------------------------------------------------")
-    logger.debug("getting effects latestTx="+latestTxId)
-    logger.debug("---------------------------------------------------------------")   
-    // let b = await stellarAccount.listEffects(latestTxId)
-    
+    logger.debug("getting effects latestTx="+latestEffectId)
+    logger.debug("---------------------------------------------------------------")  
+    if (!effects) { 
+        effects = await stellarAccount.listEffects(latestEffectId)
+    } else {
+        effects = filterNewEffects(effects, latestEffectId)
+    }
     // var json = JSON.stringify(b, null, 4);
     // fs.writeFileSync("./effects.json", json, 'utf8');
 
     logger.debug("---------------------------------------------------------------")
     logger.debug("parsing account effects")
     logger.debug("---------------------------------------------------------------") 
-    let effects = require("../effects.json")
-    let ae = new AccountEffects(effects)
+    // let effects = require("../effects.json")
+
+    let ae = new AccountEffects(account, effects)
     ae.clean()    
     ae.computeBalance(balance)
     var json = JSON.stringify(ae.effects, null, 4);
@@ -190,15 +210,13 @@ async function updateAccount(account) {
         return
     }
 
-    for (let p of positions) {
-        p.account = account
-        await p.save()
-    }
+    await Position.objects.save(positions)
 
-    for (let r of as.getRecords()) {
+    let asr = as.getRecords()
+    for (let r of asr) {
         r.account = account
-        await r.save()
     }
+    await AccountSummary.objects.save(asr)
 
     log.info('get start')
     let startOfMonth = moment().startOf('month').toDate()
