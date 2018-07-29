@@ -5,6 +5,7 @@ var _ = require('lodash'),
     stellarServer = stellarPay.liveServer(),
     roundTo = require('round-to'),
     pgo = require('pg-orm'),
+    tx = pgo.tx,
     Account = pgo.model("Account"),    
     Position = pgo.model("Position"),
     AccountSummary = pgo.model("AccountSummary"),
@@ -13,16 +14,20 @@ var _ = require('lodash'),
     fs = require('fs'),
     log4js = require('log4js'),
     AssetBalanceResolver = require("./balance").AssetBalanceResolver,
-    portfolio = require("./portfolio"),
+    config = require("../config/config"),
+    portfolio = require("./portfolio"),    
     AccountEffects = portfolio.AccountEffects,
     AccountSummarizer = portfolio.AccountSummarizer
 
 var logger = log4js.getLogger('main');
 // logger.setLevel('DEBUG');
 
-var server = new StellarSdk.Server('https://horizon.stellar.org'); 
+var server = new StellarSdk.Server(config.stellarServer); 
 
 stellarServer = stellarPay.liveServer()
+
+var updateAccountLogger = log4js.getLogger('updateAccount');
+var aggsLogger = log4js.getLogger('aggs');
 
 async function createTestAccount() {
     let a = await Account.objects.get({ address: "GDN6T23YXBL3JQBZUBU6NBQCNAPRQDGSTNU3QTYV6STDR5GDIIBKAWTM"})
@@ -73,6 +78,10 @@ function checkPositions() {
     return outSold
 }
 
+async function testTemp() {
+
+}
+
 module.exports.test = async function() {
     let account = await createTestAccount() 
 
@@ -85,6 +94,10 @@ module.exports.test = async function() {
     // }
 
     await updateAccount(account)
+}
+
+async function checkHealth(request, response) {    
+    response.json({status: "ok"})
 }
 
 async function listAccounts(request, response) {
@@ -112,13 +125,16 @@ async function createAccount(request, response) {
         }
     }
 
-    let a = new Account(data)
-    await a.save()
+    let outAccount = await tx(async pclient => {
+        let a = new Account(data)
+        await a.save(pclient)
 
-    // TODO: handle failures
-    await updateAccount(a, data.effects)
+        // TODO: handle failures
+        await updateAccount(a, pclient, data.effects)
+        return a
+    })
 
-    response.json(a)
+    response.json(outAccount)
 }
 
 async function deleteAccount(request, response) {
@@ -143,22 +159,65 @@ function filterNewEffects(effects, latestEffectId) {
     return out
 }
 
-async function updateAccount(account, effects) {
+async function syncAccounts(accounts) {
+    updateAccountLogger.debug("BEGIN SYNCING ACCOUNTS")
+    if (!accounts) {
+        let UPDATE_MAX_COUNT = 5
+        let today = moment().startOf('day')
+        accounts = await Account.objects.filter({ lastUpdateTime__isnull: true, limit: UPDATE_MAX_COUNT })
+    }
+
+    for (let account of accounts) {
+        updateAccountLogger.debug("SYNCING " + account.address)        
+        await tx(async pclient => {
+            await updateAccount(account, pclient)
+            await updateAggsForAccount(account, pclient)
+        })
+    }
+}
+module.exports.syncAccounts = syncAccounts
+
+async function updateAggsForAccount(account, pclient) {
+    aggsLogger.debug("updating account: "+account.address)
+    let end = await AccountSummary.objects.get({ orderBy: "-date", account: account })
+    if (!end) {
+        aggsLogger.debug("no summaries found")
+        return
+    }
+
+    await updateAggs(end)
+}
+
+async function updateAccount(account, pclient, effects, opts) {
     let DONT_SAVE = false
 
+    if (opts && opts.forceDebug) {
+        updateAccountLogger.debug("force dbugging")
+        DONT_SAVE = true
+    }
+
     // await pgo.truncateAll()
-    logger.debug("checking account", account)
+    updateAccountLogger.debug("checking account for update", account)
+    if (effects) {
+        updateAccountLogger.debug("effects provide", effects.length)            
+    }
+
     let latestDayRecord = await AccountSummary.objects.get({account:account, orderBy:"-date"})
     let latestEffectId = latestDayRecord ? latestDayRecord.lastEffectId : null
-    logger.debug("checking latestDayRecord", latestDayRecord)
+    updateAccountLogger.debug("checking latestDayRecord", latestDayRecord)
 
     let stellarAccount = stellarServer.getAccount({address: account.address})
     let balance = await stellarAccount.getBalanceFull()
-    console.dir(balance) 
+    updateAccountLogger.debug("balance", balance)     
 
-    logger.debug("---------------------------------------------------------------")
-    logger.debug("getting effects latestTx="+latestEffectId)
-    logger.debug("---------------------------------------------------------------")  
+    if (opts && opts.forceDebug && latestEffectId) {
+        updateAccountLogger.debug("forcing import effects")
+        latestEffectId = null
+    }
+
+    updateAccountLogger.debug("---------------------------------------------------------------")
+    updateAccountLogger.debug("getting effects latestTx="+latestEffectId)
+    updateAccountLogger.debug("---------------------------------------------------------------")  
     if (!effects) { 
         effects = await stellarAccount.listEffects(latestEffectId)
     } else {
@@ -167,31 +226,32 @@ async function updateAccount(account, effects) {
     // var json = JSON.stringify(b, null, 4);
     // fs.writeFileSync("./effects.json", json, 'utf8');
 
-    logger.debug("---------------------------------------------------------------")
-    logger.debug("parsing account effects")
-    logger.debug("---------------------------------------------------------------") 
+    updateAccountLogger.debug("---------------------------------------------------------------")
+    updateAccountLogger.debug("parsing account effects")
+    updateAccountLogger.debug("---------------------------------------------------------------") 
     // let effects = require("../effects.json")
 
     let ae = new AccountEffects(account, effects)
     ae.clean()    
     ae.computeBalance(balance)
-    var json = JSON.stringify(ae.effects, null, 4);
-    fs.writeFileSync("e2.json", json, 'utf8');
+
+    writeDebug(ae.effects, "e2.json")    
 
     // return
 
-    logger.debug("---------------------------------------------------------------")
-    logger.debug("parsing positions")
-    logger.debug("---------------------------------------------------------------") 
+    updateAccountLogger.debug("---------------------------------------------------------------")
+    updateAccountLogger.debug("parsing positions")
+    updateAccountLogger.debug("---------------------------------------------------------------") 
     let existingOpenPositions = await Position.objects.filter({ account: account, type:"open", openAmount__gt:0, orderBy:"-time"})
-    logger.debug("existing open positions", existingOpenPositions)
+    updateAccountLogger.debug("existing open positions", existingOpenPositions)
 
     let positions = ae.getPositions(existingOpenPositions)
-    writeJson(positions, "positions.json")
+    
+    writeDebug(positions, "positions.json")
 
-    logger.debug("---------------------------------------------------------------")
-    logger.debug("creating account summary")
-    logger.debug("---------------------------------------------------------------") 
+    updateAccountLogger.debug("---------------------------------------------------------------")
+    updateAccountLogger.debug("creating account summary")
+    updateAccountLogger.debug("---------------------------------------------------------------") 
     let as = new AccountSummarizer(latestDayRecord)
     as.addPositions(positions)
     as.addEffects(ae.effects)
@@ -204,36 +264,40 @@ async function updateAccount(account, effects) {
     dmo.sort(function(a, b){
         return moment(a.date).valueOf() - moment(b.date).valueOf()
     })
-    writeJson(dmo, "weekmap.json")
+    writeDebug(dmo, "weekmap.json")
 
     if (DONT_SAVE) {
         return
     }
-
-    await Position.objects.save(positions)
+    
+    await Position.objects.save(positions, pclient)
 
     let asr = as.getRecords()
     for (let r of asr) {
         r.account = account
     }
-    await AccountSummary.objects.save(asr)
+    await AccountSummary.objects.save(asr, pclient)
 
-    log.info('get start')
-    let startOfMonth = moment().startOf('month').toDate()
-    let start = await AccountSummary.objects.get({ date__gte: startOfMonth, orderBy: "date"})
-    console.dir(start)
+    account.lastUpdateTime = new Date()
+    await account.save(pclient)
 
-    let end = await AccountSummary.objects.get({ date__lte: moment().toDate(), orderBy:"-date" })
-    console.dir(end)    
+    // log.info('get start')
+    // let startOfMonth = moment().startOf('month').toDate()
+    // let start = await AccountSummary.objects.get({ date__gte: startOfMonth, orderBy: "date"})
+    // console.dir(start)
 
-    let roi = end.getRoi(start) 
-    log.info("ROI="+roi)
+    // can't do aggs until we save
+    // let end = await AccountSummary.objects.get({ date__lte: moment().toDate(), orderBy:"-date" })
+    // console.dir(end)    
 
-    let start0 = await AccountSummary.objects.get({ orderBy: "date" })
-    roi = end.getRoi(start0)
-    log.info("ROI0=" + roi)
+    // let roi = end.getRoi(start) 
+    // log.info("ROI="+roi)
 
-    await updateAggs(end)
+    // let start0 = await AccountSummary.objects.get({ orderBy: "date" })
+    // roi = end.getRoi(start0)
+    // log.info("ROI0=" + roi)
+
+    // await updateAggs(end)
 }    
 
 async function updateAggs(end) {
@@ -281,15 +345,17 @@ async function updateAggs(end) {
         outAggs[l] = agg
 
         await agg.save()
-        console.dir(agg)
+        // console.dir(agg)
     }
 
     return outAggs
 }
 
-function writeJson(obj, fname) {
-    var json = JSON.stringify(obj, null, 4);
-    fs.writeFileSync(fname, json, 'utf8');
+function writeDebug(obj, fname) {
+    // if (config.env == "dev") {
+    //     var json = JSON.stringify(obj, null, 4);
+    //     fs.writeFileSync(fname, json, 'utf8');
+    // }
 }
 
 async function getLeaders(request, response) {
@@ -425,13 +491,30 @@ async function getOpenPositions(request, response) {
     response.json(aggs)
 }
 
-async function getAggs(request, response) {
+async function queryAggs(request, response) {
+    let body = request.body
+    let duration = body.duration || "last7"
+    let addresses = body.addresses
+
+    aggsLogger.debug(`Querying aggs`, body)
+
+    if (!addresses || !addresses.length) {
+        throw new ServerError("bad request: no addresses provided", "bad_request")
+    }
+
+    let aggs = await AccountAggregation.objects.filter({ account__address__in: addresses, fkReturn: ["account__address"], type:duration, orderBy:"-roi"})
+    response.json(aggs)
+}
+
+async function getAggsForAccount(request, response) {
+    aggsLogger.debug("Getting aggs for account: "+request.account.address)
     let end = await AccountSummary.objects.get({orderBy: "-date", account:request.account.id})
     if (!end) {
+        aggsLogger.debug("no summaries found")
         response.json([])
         return
     }
-
+    
     let dayAggMap = await updateAggs(end)
 
     let out = []
@@ -448,7 +531,7 @@ async function getAggs(request, response) {
     response.json(out)
 }
 
-let balanceResolver = new AssetBalanceResolver()
+let balanceResolver = new AssetBalanceResolver(server)
 
 async function getValue(summaries) {
     let requestSummaries = []
@@ -470,9 +553,6 @@ async function getYearSummary(account) {
 }
 
 async function getValuePlot(request, response) {
-    response.json([])
-    return
-
     log.info("getting value plot")
     let ss = await getYearSummary(request.account)
     log.info("summary length:" + ss.length)
@@ -554,6 +634,9 @@ module.exports.registerRoutes = function (app) {
     app.route('/api/leaders/:type')
         .get(controller(getLeaders))
     
+    app.route('/api/aggs')
+        .post(controller(queryAggs))
+
     app.route('/api/accounts/:accountId/closed')
         .get(controller(getClosedPositions))
     
@@ -561,7 +644,7 @@ module.exports.registerRoutes = function (app) {
         .get(controller(getOpenPositions))
 
     app.route('/api/accounts/:accountId/aggs')
-        .get(controller(getAggs))
+        .get(controller(getAggsForAccount))
 
     app.route('/api/accounts/:accountId/plot/profits')
         .get(controller(getProfitsPlot))
@@ -575,6 +658,9 @@ module.exports.registerRoutes = function (app) {
     app.route('/api/accounts')
         .post(controller(createAccount))
         .get(controller(listAccounts))
+
+    app.route('')    
+        .get(controller(checkHealth))
 
     app.param('accountId', accountById);
 

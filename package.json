@@ -18,6 +18,7 @@
     "json-stringify-safe": "^5.0.1",
     "lodash": "^4.17.10",
     "log4js": "^2.10.0",
+    "log4js-cloudwatch-appender": "^1.1.0",
     "moment": "^2.22.1",
     "path": "^0.12.7",
     "pg": "^7.4.3",

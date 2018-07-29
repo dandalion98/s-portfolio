@@ -90,9 +90,6 @@ class AccountSummary extends Model {
     }
 
     updateTotals(prevOrSameDayRecord) {
-        log.error("udpating tot last")
-        console.dir(prevOrSameDayRecord)
-
         this.totalCredits = +prevOrSameDayRecord.totalCredits + (this.credits || 0)
         this.totalDebits = +prevOrSameDayRecord.totalDebits + (this.debits || 0)
         this.totalProfits = +prevOrSameDayRecord.totalProfits + (this.profits || 0)

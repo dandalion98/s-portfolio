@@ -12,43 +12,49 @@ var _ = require('lodash'),
     express = require('express'),
     config = require('./config/config'),
     StellarSdk = require('stellar-sdk'),
-    log4js = require('log4js'),
     fs = require('fs'),
-  config = require("./config/config");
+    log4js = require('log4js'),
+    config = require("./config/config");
 
 require('app-module-path').addPath("./common_modules")
 require("./src/models")
 
-
-let LOG_FILES = ['./logs/main.log', './logs/aggs.log', './logs/value.log']
-for (let lf of LOG_FILES) {
-  try {
-    fs.unlinkSync(lf)
-  } catch (e) { }
+if (config.env == 'dev') {
+  let LOG_FILES = ['./logs/update-account.log', './logs/aggs.log', './logs/value.log']
+  for (let lf of LOG_FILES) {
+    try {
+      fs.unlinkSync(lf)
+    } catch (e) { }
+  }
 }
 
-log4js.configure({
-  appenders: { main: { type: 'file', filename: 'logs/main.log', level: 'debug' },
-               aggs: { type: 'file', filename: 'logs/aggs.log', level: 'debug' },
-               value: { type: 'file', filename: 'logs/value.log', level: 'debug' },
-               },
-  categories: { default: { appenders: ['main', 'aggs', 'value'], level: 'debug' } }
-});
+log4js.configure(config.logging);
 
-var logr = log4js.getLogger('aggs');
-logr.error("AGGS")
+log.error("testint")
+var logr = log4js.getLogger('updateAccount');
+logr.error("test123")
 
 
 let controllers = require('./src/controller')
 // let seed = require('./src/seed')
 
+async function periodicSyncAccounts() {
+  await controllers.syncAccounts()
+  scheduleSyncAcccounts()
+}
+
+function scheduleSyncAcccounts() {
+  setTimeout(periodicSyncAccounts, 60 * 60 * 60 * 1000)
+}
 
 async function main() { 
   await initPG()
 
+  periodicSyncAccounts()
+
 //   await seed.seed()
 
-  // await controllers.test() 
+  await controllers.test() 
 
   log.info("Starting server on port: " + config.port)
   var app = express();

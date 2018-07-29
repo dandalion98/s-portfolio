@@ -1,4 +1,7 @@
-let StellarSdk = require('stellar-sdk');
+let StellarSdk = require('stellar-sdk'),
+    moment = require('moment'),
+    log = require('tracer').colorConsole(),
+    log4js = require('log4js');
 
 /*
  * Responsible for tracking and caching the price history
@@ -44,7 +47,7 @@ class AssetPriceHistory {
     getPrice(date) {
         let out = this.datePriceMap[+date]
         if (undefined == out) {
-            log.error(`No price for ${this.ticker} on ${date}`)
+            // log.error(`No price for ${this.ticker} on ${date}`)
             return 0
         }
 
@@ -77,7 +80,7 @@ class AssetPriceHistory {
             let recordDate = moment(+record.timestamp).startOf('day')
 
             while (+nextExpectedDate != recordDate) {
-                loggr.debug(`filling ts=${nextExpectedDate} price=${prevPrice}`)
+                // loggr.debug(`filling ts=${nextExpectedDate} price=${prevPrice}`)
                 this.datePriceMap[+nextExpectedDate] = prevPrice
                 nextExpectedDate = nextExpectedDate.add(1, 'day')
             }
@@ -93,7 +96,7 @@ class AssetPriceHistory {
             }
 
             this.datePriceMap[+recordDate] = price
-            loggr.debug(`added ts=${recordDate} price=${price}`)
+            // loggr.debug(`added ts=${recordDate} price=${price}`)
             nextExpectedDate = recordDate.add(1, 'day')
             prevPrice = price
         }
@@ -102,69 +105,123 @@ class AssetPriceHistory {
 
 module.exports.AssetPriceHistory = AssetPriceHistory
 
+class TickerDateRangeMap {
+    constructor() {
+        // map of ticker to [start, end] pairs
+        this.map = {}
+    }
+
+    update(ticker, date) {
+        if (!this.map[ticker]) {
+            this.map[ticker] = [null, null]
+        }
+
+        let dateRange = this.map[ticker]
+        let earliest = dateRange[0]
+        let latest = dateRange[1]
+        if (!earliest || date < earliest) {
+            dateRange[0] = date
+        }
+
+        if (!latest || date > latest) {
+            dateRange[1] = date
+        }
+    }
+
+    getTickers() {
+        return Object.keys(this.map)
+    }
+    
+    getDateRange(ticker) {
+        return this.map[ticker]
+    }
+}
+
 /*
  * Responsible for resolving balances for diverse assets into 
  * estimate XLM value based on price history.
  */
 class AssetBalanceResolver {
-    constructor() {
-        this.assetPriceHistoryMap = {}
+    constructor(stellarServer) {
+        this.stellarServer = stellarServer
+        this.tickerPriceHistoryMap = {}
     }
 
-    async getValueXlm(summaries) {
+    async getValueXlm(accountSummaries) {
         let loggr = log4js.getLogger('value')
-        loggr.debug("getting value")
+        loggr.debug("getting XLM value for account")
 
-        let earliestSumary = summaries[0]
-        let latestSumary = summaries[summaries.length - 1]
-        let dateRange = [earliestSumary.date, latestSumary.date]
-        loggr.debug("date range", dateRange)
+        // let earliestSumary = accountSummaries[0]
+        // let latestSumary = accountSummaries[accountSummaries.length - 1]
+        // let dateRange = [earliestSumary.date, latestSumary.date]
+        // loggr.debug("date range", dateRange)
 
-        let assetsToResolve = new Set()
-        for (let s of summaries) {
-            if (typeof s.endBalance === 'string') {
-                s.endBalance = JSON.parse(s.endBalance)
+        // let assetsToResolve = new Set()
+        let tickerDateRangeMap = new TickerDateRangeMap()
+        for (let accountSummary of accountSummaries) {
+            if (typeof accountSummary.endBalance === 'string') {
+                accountSummary.endBalance = JSON.parse(accountSummary.endBalance)
+            }
 
-                for (let ticker in s.endBalance) {
-                    if (ticker != 'native' && s.endBalance[ticker] > 0) {
-                        assetsToResolve.add(ticker)
-                    }
+            for (let ticker in accountSummary.endBalance) {
+                if (ticker != 'native' && accountSummary.endBalance[ticker] > 0) {
+                    // assetsToResolve.add(ticker)
+                    tickerDateRangeMap.update(ticker, accountSummary.date)
                 }
             }
         }
 
-        assetsToResolve = Array.from(assetsToResolve)
-        loggr.debug("assets to resolve", assetsToResolve)
-
-        for (let asset of assetsToResolve) {
-            if (!this.assetPriceHistoryMap[asset]) {
-                loggr.debug("creating price history for asset", asset)
-                this.assetPriceHistoryMap[asset] = new AssetPriceHistory(asset, server)
+        let pending = []
+        for (let ticker of tickerDateRangeMap.getTickers()) {
+            loggr.debug("getting price range for ticker="+ticker)            
+            if (!this.tickerPriceHistoryMap[ticker]) {
+                loggr.debug("creating price history for asset", ticker)
+                this.tickerPriceHistoryMap[ticker] = new AssetPriceHistory(ticker, this.stellarServer)
             }
 
-            await this.assetPriceHistoryMap[asset].getPricesForRange(dateRange)
+            let dateRange = tickerDateRangeMap.getDateRange(ticker)
+            loggr.debug("dateRange: ", dateRange)
+            let prom = this.tickerPriceHistoryMap[ticker].getPricesForRange(dateRange)
+            pending.push(prom)
         }
 
+        loggr.debug(`Getting prices for ${pending.length} assets`)        
+        pending = Promise.all(pending)
+        await pending
+        loggr.debug("Finished getting prices")
+
+        // assetsToResolve = Array.from(assetsToResolve)
+        // loggr.debug("assets to resolve", assetsToResolve)
+
+        // for (let asset of assetsToResolve) {
+        //     if (!this.assetPriceHistoryMap[asset]) {
+        //         loggr.debug("creating price history for asset", asset)
+        //         this.assetPriceHistoryMap[asset] = new AssetPriceHistory(asset, this.stellarServer)
+        //     }
+
+        //     await this.assetPriceHistoryMap[asset].getPricesForRange(dateRange)
+        // }
+
         let today = moment().startOf("day")
-        for (let s of summaries) {
-            if (+moment(s.date).startOf("day") == +today) {
+        for (let accountSummary of accountSummaries) {
+            if (+moment(accountSummary.date).startOf("day") == +today) {
                 // no close price yet
                 continue
             }
 
             let value = 0
-            for (let asset in s.endBalance) {
+            for (let asset in accountSummary.endBalance) {
                 if (asset == 'native') {
-                    value += s.endBalance.native
-                } else {
-                    if (!this.assetPriceHistoryMap[asset]) {
+                    value += accountSummary.endBalance.native
+                } else if (accountSummary.endBalance[asset] > 0) {
+                    if (!this.tickerPriceHistoryMap[asset]) {
                         log.error("Could not find asset: " + asset)
                     } else {
-                        value += s.endBalance[asset] * this.assetPriceHistoryMap[asset].getPrice(s.date)
+                        value += accountSummary.endBalance[asset] * this.tickerPriceHistoryMap[asset].getPrice(accountSummary.date)
                     }
                 }
             }
-            s.valueXlm = value
+            accountSummary.valueXlm = value
         }
     }
 }

@@ -72,3 +72,8 @@ local.properties
 # IntelliJ
 # ========
 *.iml
+
+.aws_config
+
+development.js
+production.js
