@@ -50,7 +50,7 @@ _site/
 logs/
 build/
 temp/
-sample/
+samples/
 backup/
 src/seed.js
 

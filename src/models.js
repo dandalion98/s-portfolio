@@ -125,6 +125,10 @@ AccountSummary.structure = [
     ["valueUsd", { "type": "decimal", optional: true }]
 ]
 
+AccountSummary.constraints = [
+    "ADD UNIQUE (\"account\", \"date\")"
+]
+
 pgo.registerModel(AccountSummary, moduleName)    
 
 // at end of each day, get all accounts where positions added today; 
@@ -185,6 +189,7 @@ class Position extends Model {
 
         let out = []
         let remainingAmount = this.soldAmount
+        let index = 0
         for (let peer of peers) {
             if (remainingAmount < 0) {
                 throw new Error("amount mismatch")
@@ -194,7 +199,8 @@ class Position extends Model {
             let soldPercentage = soldAmount / this.soldAmount
             let boughtAmount = roundTo(soldPercentage * this.boughtAmount, 7)
 
-            out.push(this.clone({soldAmount: soldAmount, boughtAmount: boughtAmount}))     
+            out.push(this.clone({soldAmount: soldAmount, boughtAmount: boughtAmount, tradeId: this.tradeId, tradeIndex: index}))
+            index++
             remainingAmount -= peer.openAmount       
         }
 
@@ -245,6 +251,7 @@ class Position extends Model {
 Position.structure = [
     ["account", { "type": "foreignKey", "target": "Account", deleteCascade: true}],    
     ["tradeId", { "type": "text"}],
+    ["tradeIndex", { "type": "integer", "default": 0}],
     // open or close
     ["type", { "type": "string", "maxLength": 10 }],
 
@@ -262,7 +269,12 @@ Position.structure = [
     ["openTradeId", { "type": "text", "optional":true}],
     // profits in XLM
     ["profits", { "type": "decimal", "default": 0}],
-    ["time", { "type": "datetime" }]
+    ["time", { "type": "datetime" }] 
 ]
+
+Position.constraints = [
+    "ADD UNIQUE (\"tradeId\", \"tradeIndex\")"
+]
+
 
 pgo.registerModel(Position, moduleName)

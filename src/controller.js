@@ -10,7 +10,7 @@ var _ = require('lodash'),
     Position = pgo.model("Position"),
     AccountSummary = pgo.model("AccountSummary"),
     AccountAggregation = pgo.model("AccountAggregation"),
-    moment = require('moment'),
+    moment = require('moment'),    
     fs = require('fs'),
     log4js = require('log4js'),
     AssetBalanceResolver = require("./balance").AssetBalanceResolver,
@@ -18,6 +18,8 @@ var _ = require('lodash'),
     portfolio = require("./portfolio"),    
     AccountEffects = portfolio.AccountEffects,
     AccountSummarizer = portfolio.AccountSummarizer
+
+require('moment-round');
 
 var logger = log4js.getLogger('main');
 // logger.setLevel('DEBUG');
@@ -30,9 +32,9 @@ var updateAccountLogger = log4js.getLogger('updateAccount');
 var aggsLogger = log4js.getLogger('aggs');
 
 async function createTestAccount() {
-    let a = await Account.objects.get({ address: "GDN6T23YXBL3JQBZUBU6NBQCNAPRQDGSTNU3QTYV6STDR5GDIIBKAWTM"})
+    let a = await Account.objects.get({ address: config.testAccount})
     if (!a) {
-        a = new Account({ address: "GDN6T23YXBL3JQBZUBU6NBQCNAPRQDGSTNU3QTYV6STDR5GDIIBKAWTM"})
+        a = new Account({ address: config.testAccount})
         await a.save()
     }
     return a
@@ -79,11 +81,31 @@ function checkPositions() {
 }
 
 async function testTemp() {
+    let effects = require("../samples/positions.json")
+    let map = {}
+    log.info("got " + effects.length)
+    for (let e of effects) {
+        if (map[e.tradeId]) {
+            log.warn("dupe: " + e.tradeId)
+        }
 
+        map[e.tradeId] = true
+    }
 }
 
 module.exports.test = async function() {
+    // testTemp()
+    // return
+
     let account = await createTestAccount() 
+
+    // let p = await Position.objects.filter({ tradeId:"0083073798605135873-0000000001"})
+    // log.error("ddx p")
+    // console.dir(p)
+
+    // // let today = moment().startOf('day')
+    // let as = await AccountSummary.objects.filter({account: account, orderBy:"-date", limit:5})
+    // console.dir(as)
 
     // let smp = checkPositions()
     // let sme = checkEffects()
@@ -93,7 +115,16 @@ module.exports.test = async function() {
     //     }
     // }
 
-    await updateAccount(account)
+    // await syncAccounts([account])
+
+    // await tx(async pclient => {
+    //     await updateAccount(account, pclient, null, {
+    //         noSave: false,
+    //         //    forceImport: true,
+    //         // startId: "0083073510842314753-0000000001"
+    //     })
+    // })
+    
 }
 
 async function checkHealth(request, response) {    
@@ -143,6 +174,32 @@ async function deleteAccount(request, response) {
     response.json({})
 }
 
+function truncateEffects(effects, startId) {
+    if (!startId) {
+        throw new Error("No start ID provided")
+    }
+
+    // log.info("truncating effects: start="+startId)
+    let out = []
+    let foundStart = false
+    for (let e of effects) {
+        // log.info(e.id)
+        if (e.id == startId) {
+            foundStart = true
+        }
+
+        if (foundStart) {
+            out.push(e)
+        }
+    }
+
+    if (!foundStart) {
+        throw new Error("Did not find start effect: " + startId)
+    }
+
+    return out
+}
+
 function filterNewEffects(effects, latestEffectId) {
     if (!latestEffectId) {
         return effects
@@ -160,16 +217,26 @@ function filterNewEffects(effects, latestEffectId) {
 }
 
 async function syncAccounts(accounts) {
-    updateAccountLogger.debug("BEGIN SYNCING ACCOUNTS")
+    let startTime = moment().round(30, "minutes")
+    updateAccountLogger.debug("BEGIN SYNCING ACCOUNTS for interval: " + startTime)
     if (!accounts) {
-        let UPDATE_MAX_COUNT = 5
-        let today = moment().startOf('day')
+        let UPDATE_MAX_COUNT = 15
         accounts = await Account.objects.filter({ lastUpdateTime__isnull: true, limit: UPDATE_MAX_COUNT })
+
+        if (!accounts || !accounts.length) {
+            accounts = await Account.objects.filter({ lastUpdateTime__lt: startTime, limit: UPDATE_MAX_COUNT })
+        }
     }
 
-    for (let account of accounts) {
+    for (let account of accounts) {        
         updateAccountLogger.debug("SYNCING " + account.address)        
         await tx(async pclient => {
+            account = await Account.objects.get({ id: account.id, lock: true })
+            if (!account) {
+                updateAccountLogger.warn("Failed to lock")
+                return null
+            }
+            
             await updateAccount(account, pclient)
             await updateAggsForAccount(account, pclient)
         })
@@ -191,7 +258,7 @@ async function updateAggsForAccount(account, pclient) {
 async function updateAccount(account, pclient, effects, opts) {
     let DONT_SAVE = false
 
-    if (opts && opts.forceDebug) {
+    if (opts && opts.noSave) {
         updateAccountLogger.debug("force dbugging")
         DONT_SAVE = true
     }
@@ -210,7 +277,7 @@ async function updateAccount(account, pclient, effects, opts) {
     let balance = await stellarAccount.getBalanceFull()
     updateAccountLogger.debug("balance", balance)     
 
-    if (opts && opts.forceDebug && latestEffectId) {
+    if (opts && opts.forceImport && latestEffectId) {
         updateAccountLogger.debug("forcing import effects")
         latestEffectId = null
     }
@@ -223,6 +290,13 @@ async function updateAccount(account, pclient, effects, opts) {
     } else {
         effects = filterNewEffects(effects, latestEffectId)
     }
+
+    if (opts && opts.startId) {
+        effects = truncateEffects(effects, opts.startId)
+    }
+
+    updateAccountLogger.debug("got " + effects.length + " effects")
+
     // var json = JSON.stringify(b, null, 4);
     // fs.writeFileSync("./effects.json", json, 'utf8');
 
@@ -352,10 +426,10 @@ async function updateAggs(end) {
 }
 
 function writeDebug(obj, fname) {
-    // if (config.env == "dev") {
-    //     var json = JSON.stringify(obj, null, 4);
-    //     fs.writeFileSync(fname, json, 'utf8');
-    // }
+    if (config.env == "dev") {
+        var json = JSON.stringify(obj, null, 4);
+        fs.writeFileSync("./samples/"+fname, json, 'utf8'); 
+    }
 }
 
 async function getLeaders(request, response) {

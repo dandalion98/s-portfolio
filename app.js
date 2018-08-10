@@ -39,18 +39,26 @@ let controllers = require('./src/controller')
 // let seed = require('./src/seed')
 
 async function periodicSyncAccounts() {
-  await controllers.syncAccounts()
+  log.info("periodic sync account")
+  try {
+    await controllers.syncAccounts()
+  } catch (error) {
+    log.error(error)
+  }
   scheduleSyncAcccounts()
 }
 
-function scheduleSyncAcccounts() {
-  setTimeout(periodicSyncAccounts, 60 * 60 * 60 * 1000)
+function scheduleSyncAcccounts(timeout) {
+  if (undefined === timeout) {
+    timeout = 15 * 60 * 1000
+  }
+  setTimeout(periodicSyncAccounts, timeout)
 }
 
 async function main() { 
   await initPG()
 
-  periodicSyncAccounts()
+  scheduleSyncAcccounts(0)
 
 //   await seed.seed()
 

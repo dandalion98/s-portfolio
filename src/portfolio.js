@@ -340,6 +340,7 @@ class AccountSummarizer {
                 // This effect is the last for the day
                 lastEffectPerDateMap[wsk] = e
                 dateList.unshift(daySummary)
+                logger.debug("Adding AccountSummary", daySummary)
 
                 daySummary.lastEffectId = e.id
                 daySummary.endBalance = JSON.stringify(e.endBalance)
@@ -363,7 +364,6 @@ class AccountSummarizer {
         } else {
             lastDateRecord = { totalCredits: 0, totalDebits: 0, totalProfits: 0, totalTrades: 0, totalWinningTrades: 0 }
         }
-        logger.debug("saved lastDayRecord", this.latestDayRecord)
 
         for (let i = 0; i < dateList.length; i++) {
             let dayRecord = dateList[i]
@@ -371,7 +371,20 @@ class AccountSummarizer {
             // logger.debug("dayRecord", dayRecord)
             dayRecord.updateTotals(lastDateRecord)
             lastDateRecord = dayRecord
+
+            // If day record already exists (which means we just processed more tx for same day)
+            // overwrite existing record.
+            if (this.latestDayRecord && moment(dateList[i].date).isSame(this.latestDayRecord.date)) {
+                logger.debug("overwriting existing day record for: " + this.latestDayRecord.date)
+                dateList[i].id = this.latestDayRecord.id
+            }
         }
+
+
+        // if (dateList[0].date == lastDateRecord.date) {
+        //     logger.debug("overwriting existing day record for: " + lastDateRecord.date)
+        //     dateList[0].id = lastDateRecord.id
+        // }
     }
 
     addPositions(pos) {
