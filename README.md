@@ -1,4 +1,4 @@
-# stellar-portfolio
+# s-portfolio
 A portfolio management, aggregator, and leaderboard service for Stellar.
 
 This service analyze Stellar accounts for account changes and trade positions. In computing profitability, service will attempt to account for credits and debits, to provide a best effort ROI computation. It's capable of tracking profits for as set of Stellar accounts, as well as compute leaderboards. Supports a REST API interface to query positions, account value, metrics, and leader board.
