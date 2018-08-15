@@ -32,6 +32,10 @@ var updateAccountLogger = log4js.getLogger('updateAccount');
 var aggsLogger = log4js.getLogger('aggs');
 
 async function createTestAccount() {
+    if (!config.testAccount) {
+        return
+    }
+
     let a = await Account.objects.get({ address: config.testAccount})
     if (!a) {
         a = new Account({ address: config.testAccount})

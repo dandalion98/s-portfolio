@@ -28,12 +28,9 @@ if (config.env == 'dev') {
   }
 }
 
-log4js.configure(config.logging);
-
-log.error("testint")
-var logr = log4js.getLogger('updateAccount');
-logr.error("test123")
-
+if (config.logging) {
+  log4js.configure(config.logging);
+}
 
 let controllers = require('./src/controller')
 // let seed = require('./src/seed')
@@ -62,7 +59,7 @@ async function main() {
 
 //   await seed.seed()
 
-  await controllers.test() 
+  // await controllers.test() 
 
   log.info("Starting server on port: " + config.port)
   var app = express();
