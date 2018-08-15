@@ -50,7 +50,7 @@ This project also uses log4js. log4js configuration can be optionally defined vi
 `gulp prod`
 
 # Installation
-*git submodule init .*
+*git submodule init*
 
 *git submodule update --remote*
 
