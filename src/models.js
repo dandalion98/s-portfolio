@@ -61,7 +61,9 @@ class AccountSummary extends Model {
     }
 
     getBaseInvestment() {
-        return this.totalCredits - this.totalDebits
+        // For accuracy, base investment at start of period should include 
+        // profits up to date.
+        return this.totalProfits + this.totalCredits - this.totalDebits
     }
 
     getNetCredit() {
@@ -84,6 +86,7 @@ class AccountSummary extends Model {
         // prevents inflated ROI in case
         // return was generated using credits from this period
         let netCredits = this.totalCredits - start.totalCredits
+
         baseInvestment += netCredits
 
         return profit / baseInvestment

@@ -115,7 +115,7 @@ module.exports.test = async function() {
     //     }
     // }
 
-    // await syncAccounts([account])
+    await syncAccounts([account])
 
     // await tx(async pclient => {
     //     await updateAccount(account, pclient, null, {

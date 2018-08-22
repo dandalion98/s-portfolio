@@ -58,11 +58,14 @@ function scheduleSyncAcccounts(timeout) {
 async function main() { 
   await initPG()
 
-  scheduleSyncAcccounts(0)
+  if (config.env == "dev") {
+    await controllers.test()         
+  } else {
+    scheduleSyncAcccounts(0)
+  }
 
 //   await seed.seed()
 
-  await controllers.test() 
 
   log.info("Starting server on port: " + config.port)
   var app = express();
