@@ -324,6 +324,7 @@ class AccountSummarizer {
 
     // Assuming parsing effects backwards in date (from most recent to least recent)
     // This only parses new effects
+    // To get starting balance, all effects must have been labled with end balances
     // Positions must have been already added at this point
     addEffects(effects) {
         logger.debug("Processing effects")
@@ -350,7 +351,12 @@ class AccountSummarizer {
                 daySummary.debits = (daySummary.debits || 0) + e.amount
             } else if (e.type == "account_credited") {
                 daySummary.credits = (daySummary.credits || 0) + e.amount
-            } // trades taken care of by positions
+            } else if (e.type == "signer_created") {
+                // handle case for starting balance
+                daySummary.credits = (daySummary.credits || 0) + e.endBalance.native || 0
+            }
+            
+            // trades taken care of by positions
         }
 
         // dateList is ordered chronologically
