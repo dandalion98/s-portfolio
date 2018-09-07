@@ -509,7 +509,7 @@ async function getClosedPositions(request, response) {
         throw new ServerError("Can't find account", "not_found")
     }
 
-    let positions = await Position.objects.filter({account:account, type:"close", orderBy:"-time"})
+    let positions = await Position.objects.filter({ account: account, type: "close", orderBy: "-time", openTradeId__isnull: false})
 
     let aggMap = {}
     let aggs = []
