@@ -44,6 +44,23 @@ async function createTestAccount() {
     return a
 }
 
+async function reimportAccount(address) {
+    log.info("Attempting to reimport account: " + address)    
+    let a = await Account.objects.get({ address: address })
+    if (!a) {
+        log.error("Skipping due to account not found")
+        return
+    }
+
+    await a.delete()
+
+    a.id = null
+    await a.save()
+    await syncAccounts([a])    
+}
+
+module.exports.reimportAccount = reimportAccount
+
 function checkEffects() {
     let effects = require("../sample/e2.json")
     let totalBought = 0
@@ -101,7 +118,7 @@ module.exports.test = async function() {
     // testTemp()
     // return
 
-    let account = await createTestAccount() 
+    let account = await createTestAccount()
 
     // let p = await Position.objects.filter({ tradeId:"0083073798605135873-0000000001"})
     // log.error("ddx p")
@@ -119,7 +136,7 @@ module.exports.test = async function() {
     //     }
     // }
 
-    await syncAccounts([account])
+    // await syncAccounts([account])
 
     // await tx(async pclient => {
     //     await updateAccount(account, pclient, null, {
@@ -127,8 +144,7 @@ module.exports.test = async function() {
     //         forceImport: true,
     //         // startId: "0083073510842314753-0000000001"
     //     })
-    // })
-    
+    // })    
 }
 
 async function checkHealth(request, response) {    
@@ -430,9 +446,14 @@ async function updateAggs(end) {
 }
 
 function writeDebug(obj, fname) {
-    if (config.env == "dev") {
-        var json = JSON.stringify(obj, null, 4);
-        fs.writeFileSync("./samples/"+fname, json, 'utf8'); 
+    try {
+        if (config.env == "dev") {
+            // log.info("ddx writing len: " + obj.length)            
+            var json = JSON.stringify(obj, null, 4);
+            fs.writeFileSync("./samples/"+fname, json, 'utf8'); 
+        }
+    } catch (error) {
+        log.error(error)
     }
 }
 

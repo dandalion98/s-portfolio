@@ -347,9 +347,9 @@ class AccountSummarizer {
                 daySummary.endBalance = JSON.stringify(e.endBalance)
             }
 
-            if (e.type == "account_debited") {
+            if (e.type == "account_debited" && e.asset_type == "native") { 
                 daySummary.debits = (daySummary.debits || 0) + e.amount
-            } else if (e.type == "account_credited") {
+            } else if (e.type == "account_credited" && e.asset_type == "native") {
                 daySummary.credits = (daySummary.credits || 0) + e.amount
             } else if (e.type == "signer_created") {
                 // handle case for starting balance
@@ -406,6 +406,13 @@ class AccountSummarizer {
                 continue
             }
 
+            if (!p.openTradeId) {
+                // Do not account for unmatched positions
+                // This could happen account sold assets that were transferred
+                // in
+                continue
+            }
+
             logger.debug("ddx close posit", p)
 
             let ws = new moment(p.time).startOf('day')
@@ -416,7 +423,7 @@ class AccountSummarizer {
                 record.winningTrades++
             }
 
-            record.profits += p.profits
+            record.profits += p.profits || 0
         }
     }
 }
